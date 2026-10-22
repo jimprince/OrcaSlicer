@@ -1,9 +1,0 @@
-{
-	"type": "filament",
-	"name": "DREMC PET-CF @System",
-	"inherits": "DREMC PET-CF @base",
-	"from": "system",
-	"setting_id": "hal1nPyBF13UL9qB",
-	"instantiation": "true",
-	"compatible_printers": []
-}

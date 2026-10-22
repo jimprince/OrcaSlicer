@@ -1,8 +1,0 @@
-schema_version = 1
-upstream_url = "https://github.com/OrcaSlicer/OrcaSlicer.git"
-upstream_branch = "main"
-fork_branch = "main"
-minimum_stgit_version = "2.6.1"
-test_commands = [
-  ["bash", "-c", "! git grep -nE \"^(<<<<<<<|>>>>>>>)( |$)\" -- src tests"],
-]

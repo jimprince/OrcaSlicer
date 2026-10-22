@@ -1,9 +1,0 @@
-{
-	"type": "filament",
-	"name": "Goofoo PLA Silk @System",
-	"inherits": "Goofoo PLA Silk @base",
-	"from": "system",
-	"setting_id": "2pW2NEoY4hFCkNun",
-	"instantiation": "true",
-	"compatible_printers": []
-}

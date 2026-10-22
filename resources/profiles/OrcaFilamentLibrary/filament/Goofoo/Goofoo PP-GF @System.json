@@ -1,9 +1,0 @@
-{
-	"type": "filament",
-	"name": "Goofoo PP-GF @System",
-	"inherits": "Goofoo PP-GF @base",
-	"from": "system",
-	"setting_id": "mns8gICV0aNwJ02L",
-	"instantiation": "true",
-	"compatible_printers": []
-}

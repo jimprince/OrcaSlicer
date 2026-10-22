@@ -1,0 +1,47 @@
+{
+  "branch": "main",
+  "created_at": "2026-10-22T06:20:00Z",
+  "number": 1,
+  "patches": [
+    {
+      "commit": "f21c493d75e6c1beb6b95833538eb214f5f717ac",
+      "lifecycle": {
+        "base": "4441bcc065f404972d9c7e904568aa11c3b9f5dc",
+        "patch_class": "upstream-bound",
+        "retire_when": "upstream-pr-merged:https://github.com/OrcaSlicer/OrcaSlicer/pull/15880",
+        "upstream": "https://github.com/OrcaSlicer/OrcaSlicer/pull/15880"
+      },
+      "name": "fork-group-user-printer-nozzle"
+    },
+    {
+      "commit": "0cb0eca09905c05aacd84ed2aff689d64a95169b",
+      "lifecycle": {
+        "base": "4441bcc065f404972d9c7e904568aa11c3b9f5dc",
+        "patch_class": "product",
+        "retire_when": "never",
+        "upstream": null
+      },
+      "name": "fork-stack-metadata"
+    }
+  ],
+  "previous_revision": null,
+  "result_commit": "0cb0eca09905c05aacd84ed2aff689d64a95169b",
+  "result_tree": "6d0ab88191ae58cfaa6d37768636ad329f6bc360",
+  "schema_version": 1,
+  "stack_state": "a57060689fdd9a890eeba0363fa830b0c113df8c",
+  "upstream_branch": "main",
+  "upstream_commit": "4441bcc065f404972d9c7e904568aa11c3b9f5dc",
+  "verification": {
+    "doctor": "passed",
+    "tests": [
+      {
+        "command": [
+          "bash",
+          "-c",
+          "! git grep -nE \"^(<<<<<<<|>>>>>>>)( |$)\" -- src tests"
+        ],
+        "returncode": 0
+      }
+    ]
+  }
+}
