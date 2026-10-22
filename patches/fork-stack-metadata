@@ -1,0 +1,10 @@
+Bottom: 11277d1c5de212747264488205407b3dbcc4f26d
+Top:    11277d1c5de212747264488205407b3dbcc4f26d
+Author: brad <bradprin@live.com>
+Date:   2026-10-22 00:19:58 -0600
+
+fork: add fork-stack metadata
+
+Fork-Class: product
+Fork-Base: 4441bcc065f404972d9c7e904568aa11c3b9f5dc
+Fork-Retire-When: never

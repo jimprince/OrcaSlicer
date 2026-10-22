@@ -1,15 +1,19 @@
 {
   "version": 5,
-  "prev": "d18fea73e016358c2b3cbe69b970c2a56cfb8b3f",
-  "head": "f21c493d75e6c1beb6b95833538eb214f5f717ac",
+  "prev": "1394f7bb6706e0e7b9401d78639a3775734360c4",
+  "head": "23c4c483a74c3a400c8341622fef0692129f0c08",
   "applied": [
-    "fork-group-user-printer-nozzle"
+    "fork-group-user-printer-nozzle",
+    "fork-stack-metadata"
   ],
   "unapplied": [],
   "hidden": [],
   "patches": {
     "fork-group-user-printer-nozzle": {
       "oid": "f21c493d75e6c1beb6b95833538eb214f5f717ac"
+    },
+    "fork-stack-metadata": {
+      "oid": "23c4c483a74c3a400c8341622fef0692129f0c08"
     }
   }
 }
