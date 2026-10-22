@@ -1,7 +1,7 @@
 Bottom: 5a63308bdd093f40581df8ea3699ebc83087826d
 Top:    11277d1c5de212747264488205407b3dbcc4f26d
 Author: Brad Prince <bradprin@live.com>
-Date:   2026-10-22 00:19:37 -0600
+Date:   2026-10-22 00:19:58 -0600
 
 fork: group user printer nozzle variants into one model (PR #15880)
 
@@ -12,3 +12,8 @@ combo, and the sidebar Variant switch stays inside that model instead of
 falling back to a stock preset (fixes #12105).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Fork-Class: upstream-bound
+Fork-Base: 4441bcc065f404972d9c7e904568aa11c3b9f5dc
+Fork-Upstream: https://github.com/OrcaSlicer/OrcaSlicer/pull/15880
+Fork-Retire-When: upstream-pr-merged:https://github.com/OrcaSlicer/OrcaSlicer/pull/15880
