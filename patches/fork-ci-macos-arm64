@@ -1,0 +1,14 @@
+Bottom: 6d0ab88191ae58cfaa6d37768636ad329f6bc360
+Top:    6d0ab88191ae58cfaa6d37768636ad329f6bc360
+Author: brad <bradprin@live.com>
+Date:   2026-10-22 00:20:54 -0600
+
+fork: build the macOS arm64 app on the fork
+
+Builds only what Brad installs (macOS arm64, unsigned bundle artifact),
+reusing upstream's build_check_cache.yml so the build recipe tracks
+upstream. Upstream workflows are disabled on the fork via the Actions API.
+
+Fork-Class: product
+Fork-Base: 4441bcc065f404972d9c7e904568aa11c3b9f5dc
+Fork-Retire-When: never
