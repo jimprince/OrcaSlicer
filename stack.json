@@ -1,11 +1,10 @@
 {
   "version": 5,
-  "prev": "6f5be45bb99a87aef1ffa49e9841a102a909a8ce",
-  "head": "64df1900e250a36df4d65182b3064f7f7123629b",
+  "prev": "3a2e385f167b7296fcb0a1a8f965661adab84884",
+  "head": "0cb0eca09905c05aacd84ed2aff689d64a95169b",
   "applied": [
     "fork-group-user-printer-nozzle",
-    "fork-stack-metadata",
-    "refresh-temp"
+    "fork-stack-metadata"
   ],
   "unapplied": [],
   "hidden": [],
@@ -14,10 +13,7 @@
       "oid": "f21c493d75e6c1beb6b95833538eb214f5f717ac"
     },
     "fork-stack-metadata": {
-      "oid": "23c4c483a74c3a400c8341622fef0692129f0c08"
-    },
-    "refresh-temp": {
-      "oid": "64df1900e250a36df4d65182b3064f7f7123629b"
+      "oid": "0cb0eca09905c05aacd84ed2aff689d64a95169b"
     }
   }
 }
