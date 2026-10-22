@@ -1,9 +1,15 @@
 {
   "version": 5,
-  "prev": null,
+  "prev": "78cdcdd993c3b65ea5ba3e5b0231613821ef8950",
   "head": "0cc3b3d3359dd521adfeb33226a9a74052526e27",
-  "applied": [],
+  "applied": [
+    "fork-group-user-printer-nozzle"
+  ],
   "unapplied": [],
   "hidden": [],
-  "patches": {}
+  "patches": {
+    "fork-group-user-printer-nozzle": {
+      "oid": "0cc3b3d3359dd521adfeb33226a9a74052526e27"
+    }
+  }
 }
