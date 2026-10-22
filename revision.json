@@ -1,7 +1,7 @@
 {
   "branch": "main",
-  "created_at": "2026-10-22T06:20:00Z",
-  "number": 1,
+  "created_at": "2026-10-22T06:21:16Z",
+  "number": 2,
   "patches": [
     {
       "commit": "f21c493d75e6c1beb6b95833538eb214f5f717ac",
@@ -22,13 +22,23 @@
         "upstream": null
       },
       "name": "fork-stack-metadata"
+    },
+    {
+      "commit": "aa29533fb6a706f90503ba02b0da6bec56cbed23",
+      "lifecycle": {
+        "base": "4441bcc065f404972d9c7e904568aa11c3b9f5dc",
+        "patch_class": "product",
+        "retire_when": "never",
+        "upstream": null
+      },
+      "name": "fork-ci-macos-arm64"
     }
   ],
-  "previous_revision": null,
-  "result_commit": "0cb0eca09905c05aacd84ed2aff689d64a95169b",
-  "result_tree": "6d0ab88191ae58cfaa6d37768636ad329f6bc360",
+  "previous_revision": "48dbc725776086a0bf0a0247a8d7cdb3096b4f5a",
+  "result_commit": "aa29533fb6a706f90503ba02b0da6bec56cbed23",
+  "result_tree": "74c858a7d85500ed519fa84636342bf3feee1849",
   "schema_version": 1,
-  "stack_state": "a57060689fdd9a890eeba0363fa830b0c113df8c",
+  "stack_state": "e396efe377073813b37323244282fa3393d35ff4",
   "upstream_branch": "main",
   "upstream_commit": "4441bcc065f404972d9c7e904568aa11c3b9f5dc",
   "verification": {
