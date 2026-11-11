@@ -1,7 +1,7 @@
 Bottom: 125dcd8a6a537c76565d2097a394a1f885cf7688
 Top:    d4928cdc0d0a61c9fb2173de856880557c9d01f1
 Author: brad <bradprin@live.com>
-Date:   2026-11-10 21:47:34 -0600
+Date:   2026-11-10 21:48:05 -0600
 
 fork: write G-code preview thumbnails from the CLI
 
@@ -23,4 +23,4 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 Fork-Class: divergence
 Fork-Base: 96967976388838e9aa16eca72db5afb22ebacb94
-Fork-Retire-When: upstream's CLI (src/OrcaSlicer.cpp) passes a thumbnail callback to export_gcode
+Fork-Retire-When: manual:upstream's CLI (src/OrcaSlicer.cpp) passes a thumbnail callback to export_gcode

@@ -1,7 +1,7 @@
 {
   "version": 5,
-  "prev": "1eaa5779bb092b835b29bd98b79b940be483c40f",
-  "head": "54267f5aceeb99b50b2e36f8510f72da84864d68",
+  "prev": "c098ee681740a54653c2e82eca489e7ec4ab1a2c",
+  "head": "6a36df8f529e61429da93298b4297a32e7e40377",
   "applied": [
     "fork-group-user-printer-nozzle",
     "fork-stack-metadata",
@@ -15,7 +15,7 @@
       "oid": "716476a34ac3472eab355e450424f94d712799aa"
     },
     "fork-cli-gcode-thumbnails": {
-      "oid": "54267f5aceeb99b50b2e36f8510f72da84864d68"
+      "oid": "6a36df8f529e61429da93298b4297a32e7e40377"
     },
     "fork-group-user-printer-nozzle": {
       "oid": "833d1e91cf4c195821a6148ef24e6866845b1fb8"
