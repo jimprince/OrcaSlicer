@@ -623,6 +623,199 @@ static void glfw_callback(int error_code, const char* description)
     BOOST_LOG_TRIVIAL(error) << "error_code " <<error_code <<", description: " <<description<< std::endl;
 }
 
+// Offscreen renderer for the CLI's thumbnails: the G-code preview blocks (as the thumbnail callback of
+// Print::export_gcode) and the 3MF plate images. The hidden GLFW window, GL loader and shader are set up
+// on the first prepare() and kept until destruction; when OpenGL is unavailable that is logged once and
+// prepare() returns false, so callers go on without thumbnails.
+class CliThumbnailRenderer
+{
+public:
+    CliThumbnailRenderer() = default;
+    CliThumbnailRenderer(const CliThumbnailRenderer&) = delete;
+    CliThumbnailRenderer& operator=(const CliThumbnailRenderer&) = delete;
+    ~CliThumbnailRenderer()
+    {
+        // Release the GL objects while their context still exists.
+        volumes.clear();
+        m_opengl_mgr.reset();
+        if (m_glfw_initialized)
+            glfwTerminate();
+    }
+
+    // Makes the GL context ready and loads the volumes of `model`, coloured by `filament_color`.
+    // The volumes are reloaded only when called with a different model (object or ID).
+    bool prepare(const Model& model, const ConfigOptionStrings* filament_color)
+    {
+        if (!m_gl_tried) {
+            m_gl_tried = true;
+            m_gl_ready = init_gl();
+        }
+        if (m_gl_ready && (m_loaded_model != &model || m_loaded_model_id != model.id())) {
+            load_volumes(model, filament_color);
+            m_loaded_model    = &model;
+            m_loaded_model_id = model.id();
+        }
+        return m_gl_ready;
+    }
+
+    // G-code thumbnail callback: one image of plate `params.plate_id` per size, none without OpenGL.
+    ThumbnailsList render(const ThumbnailsParams& params, PartPlateList& plates, Model& model, const ConfigOptionStrings* filament_color)
+    {
+        ThumbnailsList thumbnails;
+        if (!prepare(model, filament_color))
+            return thumbnails;
+        for (const Vec2d& size : params.sizes) {
+            ThumbnailData data;
+            const Point isize(size); // round to ints, as the GUI does
+            switch (GUI::OpenGLManager::get_framebuffers_type()) {
+            case GUI::OpenGLManager::EFramebufferType::Arb:
+                GUI::GLCanvas3D::render_thumbnail_framebuffer(data, isize.x(), isize.y(), params, plates, model.objects, volumes, colors,
+                                                              shader, GUI::Camera::EType::Ortho);
+                break;
+            case GUI::OpenGLManager::EFramebufferType::Ext:
+                GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(data, isize.x(), isize.y(), params, plates, model.objects, volumes, colors,
+                                                                  shader, GUI::Camera::EType::Ortho);
+                break;
+            default: BOOST_LOG_TRIVIAL(error) << "No offscreen framebuffer support; skip G-code thumbnail"; break;
+            }
+            if (data.is_valid())
+                thumbnails.push_back(std::move(data));
+        }
+        return thumbnails;
+    }
+
+    GLVolumeCollection     volumes;
+    std::vector<ColorRGBA> colors; // per extruder
+    GLShaderProgram*       shader{nullptr};
+
+private:
+    bool init_gl()
+    {
+        int glfw_major, glfw_minor, glfw_revision;
+        glfwGetVersion(&glfw_major, &glfw_minor, &glfw_revision);
+        BOOST_LOG_TRIVIAL(info) << boost::format("GLFW version %1%.%2%.%3%") % glfw_major % glfw_minor % glfw_revision;
+
+        glfwSetErrorCallback(glfw_callback);
+        // On macOS GLFW would otherwise switch the working directory to the app bundle's Resources,
+        // breaking relative output paths written after the first thumbnail.
+        glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
+        if (glfwInit() == GLFW_FALSE) {
+            const char* error_msg;
+            int code = glfwGetError(&error_msg);
+            BOOST_LOG_TRIVIAL(error) << "glfwInit return error, Error code: " << code << ", Error: " << error_msg << std::endl;
+            return false;
+        }
+        m_glfw_initialized = true;
+        BOOST_LOG_TRIVIAL(info) << "glfwInit Success."<< std::endl;
+        // Request OrcaSlicer's minimum OpenGL version, independently of the GLFW library version.
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_RED_BITS, 8);
+        glfwWindowHint(GLFW_GREEN_BITS, 8);
+        glfwWindowHint(GLFW_BLUE_BITS, 8);
+        glfwWindowHint(GLFW_ALPHA_BITS, 8);
+        glfwWindowHint(GLFW_VISIBLE, false);
+#ifdef __WXMAC__
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#else
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
+#endif
+
+        GLFWwindow* window = glfwCreateWindow(640, 480, "base_window", NULL, NULL);
+#ifndef __WXMAC__
+        if (window == NULL) {
+            // Some drivers (e.g. older Mesa) only expose compatibility profile 3.0; take whatever they offer.
+            BOOST_LOG_TRIVIAL(warning) << "Failed to create OpenGL 3.3 compatibility context, retrying with driver default" << std::endl;
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 1);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+            glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_ANY_PROFILE);
+            window = glfwCreateWindow(640, 480, "base_window", NULL, NULL);
+        }
+#endif
+        if (window == NULL) {
+            BOOST_LOG_TRIVIAL(error) << "Failed to create GLFW window; OpenGL context unavailable, skip thumbnail generating" << std::endl;
+            return false;
+        }
+        glfwMakeContextCurrent(window);
+
+        m_opengl_mgr = std::make_unique<GUI::OpenGLManager>();
+        if (!m_opengl_mgr->init_gl(false)) {
+            BOOST_LOG_TRIVIAL(error) << "init opengl failed! skip thumbnail generating" << std::endl;
+            return false;
+        }
+        BOOST_LOG_TRIVIAL(info) << "gladLoadGL Success." << std::endl;
+        shader = m_opengl_mgr->get_shader("thumbnail");
+        if (!shader) {
+            BOOST_LOG_TRIVIAL(error) << boost::format("can not get shader for rendering thumbnail");
+            return false;
+        }
+        return true;
+    }
+
+    void load_volumes(const Model& model, const ConfigOptionStrings* filament_color)
+    {
+        std::vector<std::string> color_strings;
+        if (filament_color)
+            color_strings = filament_color->vserialize();
+        else
+            color_strings.push_back("#FFFFFFFF");
+        colors.assign(color_strings.size(), ColorRGBA());
+        unsigned char rgb_color[4] = {};
+        for (size_t color_idx = 0; color_idx < color_strings.size(); ++color_idx) {
+            Slic3r::GUI::BitmapCache::parse_color4(color_strings[color_idx], rgb_color);
+            colors[color_idx] = ColorRGBA(float(rgb_color[0]) / 255.f, float(rgb_color[1]) / 255.f, float(rgb_color[2]) / 255.f, float(rgb_color[3]) / 255.f);
+        }
+
+        volumes.clear();
+        int obj_extruder_id = 1, volume_extruder_id = 1;
+        for (unsigned int obj_idx = 0; obj_idx < (unsigned int)model.objects.size(); ++ obj_idx) {
+            const ModelObject &model_object = *model.objects[obj_idx];
+            const ConfigOption* option = model_object.config.option("extruder");
+            if (option)
+                obj_extruder_id = (dynamic_cast<const ConfigOptionInt *>(option))->getInt();
+            else
+                obj_extruder_id = 1;
+            for (int volume_idx = 0; volume_idx < (int)model_object.volumes.size(); ++ volume_idx) {
+                const ModelVolume &model_volume = *model_object.volumes[volume_idx];
+                option = model_volume.config.option("extruder");
+                if (option)
+                    volume_extruder_id = (dynamic_cast<const ConfigOptionInt *>(option))->getInt();
+                else
+                    volume_extruder_id = obj_extruder_id;
+
+                BOOST_LOG_TRIVIAL(debug) << boost::format("volume %1%'s extruder_id %2%")%volume_idx %volume_extruder_id;
+                for (int instance_idx = 0; instance_idx < (int)model_object.instances.size(); ++ instance_idx) {
+                    const ModelInstance &model_instance = *model_object.instances[instance_idx];
+                    volumes.load_object_volume(&model_object, obj_idx, volume_idx, instance_idx, "volume", true, false, true);
+                    std::string color = filament_color?filament_color->get_at(volume_extruder_id - 1):"#00FF00FF";
+
+                    BOOST_LOG_TRIVIAL(debug) << boost::format("volume %1%'s color %2%")%volume_idx %color;
+
+                    Slic3r::GUI::BitmapCache::parse_color4(color, rgb_color);
+
+                    ColorRGBA new_color;
+                    new_color.r(float(rgb_color[0]) / 255.f);
+                    new_color.g(float(rgb_color[1]) / 255.f);
+                    new_color.b(float(rgb_color[2]) / 255.f);
+                    new_color.a(float(rgb_color[3]) / 255.f);
+
+                    volumes.volumes.back()->set_render_color(new_color);
+                    volumes.volumes.back()->set_color(new_color);
+                    volumes.volumes.back()->printable = model_instance.printable;
+                }
+            }
+        }
+    }
+
+    bool                                m_gl_tried{false};
+    bool                                m_gl_ready{false};
+    bool                                m_glfw_initialized{false};
+    std::unique_ptr<GUI::OpenGLManager> m_opengl_mgr;
+    const Model*                        m_loaded_model{nullptr};
+    ObjectID                            m_loaded_model_id;
+};
+
 const float bed3d_ax3s_default_stem_radius = 0.5f;
 const float bed3d_ax3s_default_stem_length = 25.0f;
 const float bed3d_ax3s_default_tip_radius = 2.5f * bed3d_ax3s_default_stem_radius;
@@ -6322,6 +6515,9 @@ int CLI::run(int argc, char **argv)
     sliced_info.prepare_time = (size_t) (global_current_time - global_begin_time);
     global_begin_time = global_current_time;
 
+    // Renders the G-code previews and 3MF plate images; sets up OpenGL only when one is needed.
+    CliThumbnailRenderer thumbnail_renderer;
+
     for (auto const &opt_key : m_actions) {
         if (opt_key == "help") {
             this->print_help();
@@ -7218,7 +7414,11 @@ int CLI::run(int argc, char **argv)
                                     }
                                     BOOST_LOG_TRIVIAL(info) << "process finished, will export gcode temporarily to " << outfile << std::endl;
                                     temp_time = (long long)Slic3r::Utils::get_current_time_utc();
-                                    outfile = print_fff->export_gcode(outfile, gcode_result, nullptr);
+                                    // The thumbnails setting asks for G-code previews; without OpenGL they are skipped.
+                                    outfile = print_fff->export_gcode(outfile, gcode_result, [&](const ThumbnailsParams& params) {
+                                        return thumbnail_renderer.render(params, partplate_list, model,
+                                            dynamic_cast<const ConfigOptionStrings*>(m_print_config.option("filament_colour")));
+                                    });
                                     time_using_cache = time_using_cache + ((long long)Slic3r::Utils::get_current_time_utc() - temp_time);
                                     BOOST_LOG_TRIVIAL(info) << "export_gcode finished: time_using_cache update to " << time_using_cache << " secs.";
                                     if (gcode_result && gcode_result->gcode_check_result.error_code) {
@@ -7530,376 +7730,249 @@ int CLI::run(int argc, char **argv)
         }
 
         if (need_regenerate_thumbnail || need_regenerate_no_light_thumbnail || need_regenerate_top_thumbnail) {
-            std::vector<std::string> colors;
-            if (filament_color) {
-                colors= filament_color->vserialize();
-            }
-            else
-                colors.push_back("#FFFFFFFF");
-
-            std::vector<ColorRGBA> colors_out(colors.size());
-            unsigned char rgb_color[4] = {};
-            for (const std::string& color : colors) {
-                Slic3r::GUI::BitmapCache::parse_color4(color, rgb_color);
-                size_t color_idx = &color - &colors.front();
-                colors_out[color_idx] = ColorRGBA(float(rgb_color[0]) / 255.f, float(rgb_color[1]) / 255.f, float(rgb_color[2]) / 255.f, float(rgb_color[3]) / 255.f);
-            }
-
-            int glfw_major, glfw_minor, glfw_revision;
-            glfwGetVersion(&glfw_major, &glfw_minor, &glfw_revision);
-            BOOST_LOG_TRIVIAL(info) << boost::format("GLFW version %1%.%2%.%3%") % glfw_major % glfw_minor % glfw_revision;
-
-            bool thumbnail_opengl_ready = false;
-            glfwSetErrorCallback(glfw_callback);
-            int ret = glfwInit();
-            if (ret == GLFW_FALSE) {
-                const char* error_msg;
-                int code = glfwGetError(&error_msg);
-                BOOST_LOG_TRIVIAL(error) << "glfwInit return error, Error code: " << code << ", Error: " << error_msg << std::endl;
-            }
-            else {
-                BOOST_LOG_TRIVIAL(info) << "glfwInit Success."<< std::endl;
-                // Request OrcaSlicer's minimum OpenGL version, independently of the GLFW library version.
-                glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-                glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-                glfwWindowHint(GLFW_RED_BITS, 8);
-                glfwWindowHint(GLFW_GREEN_BITS, 8);
-                glfwWindowHint(GLFW_BLUE_BITS, 8);
-                glfwWindowHint(GLFW_ALPHA_BITS, 8);
-                glfwWindowHint(GLFW_VISIBLE, false);
-                //glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-                //glfwDisable(GLFW_AUTO_POLL_EVENTS);
-#ifdef __WXMAC__
-                glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-                glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#else
-                glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
-#endif
-
-                GLFWwindow* window = glfwCreateWindow(640, 480, "base_window", NULL, NULL);
-#ifndef __WXMAC__
-                if (window == NULL) {
-                    // Some drivers (e.g. older Mesa) only expose compatibility profile 3.0; take whatever they offer.
-                    BOOST_LOG_TRIVIAL(warning) << "Failed to create OpenGL 3.3 compatibility context, retrying with driver default" << std::endl;
-                    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 1);
-                    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-                    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_ANY_PROFILE);
-                    window = glfwCreateWindow(640, 480, "base_window", NULL, NULL);
-                }
-#endif
-                if (window == NULL)
-                {
-                    BOOST_LOG_TRIVIAL(error) << "Failed to create GLFW window; skipping thumbnail rendering for CLI export" << std::endl;
-                }
-                else {
-                    glfwMakeContextCurrent(window);
-                    thumbnail_opengl_ready = true;
-                }
-            }
-
-            //opengl manager related logic
-            if (!thumbnail_opengl_ready) {
-                BOOST_LOG_TRIVIAL(error) << "OpenGL context unavailable; skip thumbnail generating" << std::endl;
+            if (!thumbnail_renderer.prepare(m_models[0], filament_color)) {
                 need_create_thumbnail_group = false;
                 need_create_no_light_group = false;
                 need_create_top_group = false;
             }
             else
             {
-                GUI::OpenGLManager opengl_mgr;
-                bool opengl_valid = opengl_mgr.init_gl(false);
-                if (!opengl_valid) {
-                    BOOST_LOG_TRIVIAL(error) << "init opengl failed! skip thumbnail generating" << std::endl;
-                }
-                else {
-                    BOOST_LOG_TRIVIAL(info) << "gladLoadGL Success." << std::endl;
-                    GLVolumeCollection glvolume_collection;
-                    Model &model = m_models[0];
-                    int obj_extruder_id = 1, volume_extruder_id = 1;
-                    for (unsigned int obj_idx = 0; obj_idx < (unsigned int)model.objects.size(); ++ obj_idx) {
-                        const ModelObject &model_object = *model.objects[obj_idx];
-                        const ConfigOption* option = model_object.config.option("extruder");
-                        if (option)
-                            obj_extruder_id = (dynamic_cast<const ConfigOptionInt *>(option))->getInt();
-                        else
-                            obj_extruder_id = 1;
-                        for (int volume_idx = 0; volume_idx < (int)model_object.volumes.size(); ++ volume_idx) {
-                            const ModelVolume &model_volume = *model_object.volumes[volume_idx];
-                            option = model_volume.config.option("extruder");
-                            if (option)
-                                volume_extruder_id = (dynamic_cast<const ConfigOptionInt *>(option))->getInt();
-                            else
-                                volume_extruder_id = obj_extruder_id;
-
-                            BOOST_LOG_TRIVIAL(debug) << boost::format("volume %1%'s extruder_id %2%")%volume_idx %volume_extruder_id;
-                            //if (!model_volume.is_model_part())
-                            //    continue;
-                            for (int instance_idx = 0; instance_idx < (int)model_object.instances.size(); ++ instance_idx) {
-                                const ModelInstance &model_instance = *model_object.instances[instance_idx];
-                                glvolume_collection.load_object_volume(&model_object, obj_idx, volume_idx, instance_idx, "volume", true, false, true);
-                                //glvolume_collection.volumes.back()->geometry_id = key.geometry_id;
-                                std::string color = filament_color?filament_color->get_at(volume_extruder_id - 1):"#00FF00FF";
-
-                                BOOST_LOG_TRIVIAL(debug) << boost::format("volume %1%'s color %2%")%volume_idx %color;
-
-                                unsigned char  rgb_color[4] = {};
-                                Slic3r::GUI::BitmapCache::parse_color4(color, rgb_color);
-
-                                ColorRGBA new_color;
-                                new_color.r(float(rgb_color[0]) / 255.f);
-                                new_color.g(float(rgb_color[1]) / 255.f);
-                                new_color.b(float(rgb_color[2]) / 255.f);
-                                new_color.a(float(rgb_color[3]) / 255.f);
-
-                                glvolume_collection.volumes.back()->set_render_color(new_color);
-                                glvolume_collection.volumes.back()->set_color(new_color);
-                                glvolume_collection.volumes.back()->printable = model_instance.printable;
-                            }
+                Model &model = m_models[0];
+                const GLVolumeCollection &glvolume_collection = thumbnail_renderer.volumes;
+                std::vector<ColorRGBA> &colors_out = thumbnail_renderer.colors;
+                GLShaderProgram *shader = thumbnail_renderer.shader;
+                for (int i = 0; i < partplate_list.get_plate_count(); i++) {
+                    Slic3r::GUI::PartPlate *part_plate      = partplate_list.get_plate(i);
+                    PlateData *plate_data = plate_data_list[i];
+                    if (plate_data->plate_thumbnail.is_valid()) {
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, reset plate %2%'s thumbnail.")%__LINE__%(i+1);
+                            plate_data->plate_thumbnail.reset();
+                        }
+                        else {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has a valid thumbnail, width %2%, height %3%， directly using it")%(i+1) %plate_data->plate_thumbnail.width %plate_data->plate_thumbnail.height;
                         }
                     }
-
-                    ThumbnailsParams thumbnail_params;
-                    GLShaderProgram* shader = opengl_mgr.get_shader("thumbnail");
-                    if (!shader) {
-                        BOOST_LOG_TRIVIAL(error) << boost::format("can not get shader for rendering thumbnail");
-                    }
-                    else {
-                        for (int i = 0; i < partplate_list.get_plate_count(); i++) {
-                            Slic3r::GUI::PartPlate *part_plate      = partplate_list.get_plate(i);
-                            PlateData *plate_data = plate_data_list[i];
-                            if (plate_data->plate_thumbnail.is_valid()) {
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, reset plate %2%'s thumbnail.")%__LINE__%(i+1);
-                                    plate_data->plate_thumbnail.reset();
-                                }
-                                else {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has a valid thumbnail, width %2%, height %3%， directly using it")%(i+1) %plate_data->plate_thumbnail.width %plate_data->plate_thumbnail.height;
-                                }
-                            }
-                            else if (!plate_data->thumbnail_file.empty() && (boost::filesystem::exists(plate_data->thumbnail_file)))
+                    else if (!plate_data->thumbnail_file.empty() && (boost::filesystem::exists(plate_data->thumbnail_file)))
+                    {
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, clear plate %2%'s thumbnail file path to empty.")%__LINE__%(i+1);
+                            plate_data->thumbnail_file.clear();
+                        }
+                        else {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has a valid thumbnail %2% extracted from 3mf, directly using it")%(i+1) %plate_data->thumbnail_file;
+                            int dec_ret = decode_png_to_thumbnail(plate_data->thumbnail_file, plate_data->plate_thumbnail);
+                            if (!dec_ret)
                             {
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, clear plate %2%'s thumbnail file path to empty.")%__LINE__%(i+1);
-                                    plate_data->thumbnail_file.clear();
-                                }
-                                else {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has a valid thumbnail %2% extracted from 3mf, directly using it")%(i+1) %plate_data->thumbnail_file;
-                                    int dec_ret = decode_png_to_thumbnail(plate_data->thumbnail_file, plate_data->plate_thumbnail);
-                                    if (!dec_ret)
-                                    {
-                                        BOOST_LOG_TRIVIAL(info) << boost::format("decode png to mem success.");
-                                    }
-                                    else {
-                                        BOOST_LOG_TRIVIAL(warning) << boost::format("decode png to mem failed.");
-                                    }
-                                }
+                                BOOST_LOG_TRIVIAL(info) << boost::format("decode png to mem success.");
                             }
                             else {
-                                ThumbnailData* thumbnail_data = &plate_data->plate_thumbnail;
-
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, Skip plate %2%.")%__LINE__%(i+1);
-                                }
-                                else {
-                                    unsigned int thumbnail_width = 512, thumbnail_height = 512;
-                                    const ThumbnailsParams thumbnail_params = {{}, false, true, true, true, i};
-
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s thumbnail, need to regenerate")%(i+1);
-                                    switch (Slic3r::GUI::OpenGLManager::get_framebuffers_type())
-                                    {
-                                    case Slic3r::GUI::OpenGLManager::EFramebufferType::Arb:
-                                            {
-                                                BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: ARB");
-                                                Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*thumbnail_data,
-                                                   thumbnail_width, thumbnail_height, thumbnail_params,
-                                                   partplate_list, model.objects, glvolume_collection, colors_out, shader, Slic3r::GUI::Camera::EType::Ortho);
-                                                break;
-                                            }
-                                    case Slic3r::GUI::OpenGLManager::EFramebufferType::Ext:
-                                            {
-                                                BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: EXT");
-                                                Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*thumbnail_data,
-                                                   thumbnail_width, thumbnail_height, thumbnail_params,
-                                                   partplate_list, model.objects, glvolume_collection, colors_out, shader, Slic3r::GUI::Camera::EType::Ortho);
-                                                break;
-                                            }
-                                    default:
-                                            BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: unknown");
-                                            break;
-                                    }
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s thumbnail,finished rendering")%(i+1);
-                                }
-                            }
-                            if (need_create_thumbnail_group) {
-                                thumbnails.push_back(&plate_data->plate_thumbnail);
-                                BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%: add thumbnail data into group")%(i+1);
-                            }
-
-                            //no light thumbnail
-                            if (!plate_data->no_light_thumbnail_file.empty() && (boost::filesystem::exists(plate_data->no_light_thumbnail_file)))
-                            {
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, clear plate %2%'s no_light_thumbnail_file path to empty.")%__LINE__%(i+1);
-                                    plate_data->no_light_thumbnail_file.clear();
-                                }
-                                else
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has valid no_light_thumbnail_file extracted from 3mf, directly using it")%(i+1);
-                            }
-                            else{
-                                ThumbnailData *no_light_thumbnail = &part_plate->no_light_thumbnail_data;
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, Skip plate %2%.")%__LINE__%(i+1);
-                                    part_plate->no_light_thumbnail_data.reset();
-                                    plate_data->no_light_thumbnail_file.clear();
-                                }
-                                else {
-                                    unsigned int thumbnail_width = 512, thumbnail_height = 512;
-                                    const ThumbnailsParams thumbnail_params = { {}, false, true, false, true, i };
-
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s no_light_thumbnail_file missed, need to regenerate")%(i+1);
-                                    switch (Slic3r::GUI::OpenGLManager::get_framebuffers_type())
-                                    {
-                                        case Slic3r::GUI::OpenGLManager::EFramebufferType::Arb:
-                                            {
-                                                BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: ARB");
-                                                Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*no_light_thumbnail,
-                                                   thumbnail_width, thumbnail_height, thumbnail_params,
-                                                                                                  partplate_list, model.objects, glvolume_collection, colors_out, shader,
-                                                                                                  Slic3r::GUI::Camera::EType::Ortho, Slic3r::GUI::Camera::ViewAngleType::Iso,
-                                                                                                  false, true);
-                                                break;
-                                            }
-                                        case Slic3r::GUI::OpenGLManager::EFramebufferType::Ext:
-                                            {
-                                                BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: EXT");
-                                                Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*no_light_thumbnail,
-                                                   thumbnail_width, thumbnail_height, thumbnail_params,
-                                                                                                      partplate_list, model.objects, glvolume_collection, colors_out, shader,
-                                                                                                      Slic3r::GUI::Camera::EType::Ortho, Slic3r::GUI::Camera::ViewAngleType::Iso,
-                                                                                                      false, true);
-                                                break;
-                                            }
-                                        default:
-                                            BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: unknown");
-                                            break;
-                                    }
-                                    plate_data->no_light_thumbnail_file = "valid_no_light";
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s no_light thumbnail,finished rendering")%(i+1);
-                                }
-                            }
-
-                            if (need_create_no_light_group) {
-                                no_light_thumbnails.push_back(&part_plate->no_light_thumbnail_data);
-                                BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%: add thumbnail data for no_light into group")%(i+1);
-                            }
-
-                            //top thumbnails
-                            /*if (part_plate->top_thumbnail_data.is_valid() && part_plate->pick_thumbnail_data.is_valid()) {
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, reset plate %2%'s top/pick thumbnail.")%__LINE__%(i+1);
-                                    part_plate->top_thumbnail_data.reset();
-                                    part_plate->pick_thumbnail_data.reset();
-                                    plate_data->top_file.clear();
-                                    plate_data->pick_file.clear();
-                                }
-                                else {
-                                    plate_data->top_file = "valid_top";
-                                    plate_data->pick_file = "valid_pick";
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has a valid top/pick thumbnail data, directly using it")%(i+1);
-                                }
-                            }
-                            else*/
-                            if ((!plate_data->top_file.empty() && (boost::filesystem::exists(plate_data->top_file)))
-                                &&(!plate_data->pick_file.empty() && (boost::filesystem::exists(plate_data->pick_file))))
-                            {
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, clear plate %2%'s top/pick thumbnail file path to empty.")%__LINE__%(i+1);
-                                    plate_data->top_file.clear();
-                                    plate_data->pick_file.clear();
-                                }
-                                else
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has valid top/pick thumbnail extracted from 3mf, directly using it")%(i+1);
-                            }
-                            else{
-                                ThumbnailData* top_thumbnail = &part_plate->top_thumbnail_data;
-                                ThumbnailData* picking_thumbnail = &part_plate->pick_thumbnail_data;
-                                if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, Skip plate %2%.")%__LINE__%(i+1);
-                                    part_plate->top_thumbnail_data.reset();
-                                    part_plate->pick_thumbnail_data.reset();
-                                    plate_data->top_file.clear();
-                                    plate_data->pick_file.clear();
-                                }
-                                else {
-                                    unsigned int thumbnail_width = 512, thumbnail_height = 512;
-                                    const ThumbnailsParams thumbnail_params = { {}, false, true, false, true, i };
-
-                                    BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s top/pick thumbnail missed, need to regenerate, objects count %2%, skip_useless_pick %3%")%(i+1) %plate_object_count[i] %skip_useless_pick;
-                                    if (skip_useless_pick && ((plate_object_count[i] <= 1) || (plate_object_count[i] > 64)))
-                                    {
-                                        //don't render pick and top
-                                        part_plate->top_thumbnail_data.reset();
-                                        part_plate->pick_thumbnail_data.reset();
-                                        plate_data->top_file.clear();
-                                        plate_data->pick_file.clear();
-                                        BOOST_LOG_TRIVIAL(info) << boost::format("skip rendering for top&&pick");
-                                    }
-                                    else {
-                                        switch (Slic3r::GUI::OpenGLManager::get_framebuffers_type())
-                                        {
-                                            case Slic3r::GUI::OpenGLManager::EFramebufferType::Arb:
-                                                {
-                                                    BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: ARB");
-                                                    Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*top_thumbnail,
-                                                       thumbnail_width, thumbnail_height, thumbnail_params,
-                                                                                                      partplate_list, model.objects, glvolume_collection, colors_out, shader,
-                                                                                                      Slic3r::GUI::Camera::EType::Ortho, Slic3r::GUI::Camera::ViewAngleType::Top_Plate,
-                                                                                                      false);
-                                                    Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*picking_thumbnail,
-                                                       thumbnail_width, thumbnail_height, thumbnail_params,
-                                                                                                          partplate_list, model.objects, glvolume_collection, colors_out, shader,
-                                                                                                          Slic3r::GUI::Camera::EType::Ortho,
-                                                                                                          Slic3r::GUI::Camera::ViewAngleType::Top_Plate, true, true);
-                                                    break;
-                                                }
-                                            case Slic3r::GUI::OpenGLManager::EFramebufferType::Ext:
-                                                {
-                                                    BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: EXT");
-                                                    Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*top_thumbnail,
-                                                       thumbnail_width, thumbnail_height, thumbnail_params,
-                                                                                                          partplate_list, model.objects, glvolume_collection, colors_out, shader,
-                                                                                                          Slic3r::GUI::Camera::EType::Ortho,
-                                                                                                          Slic3r::GUI::Camera::ViewAngleType::Top_Plate, false);
-                                                    Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*picking_thumbnail,
-                                                       thumbnail_width, thumbnail_height, thumbnail_params, partplate_list, model.objects,
-                                                                                                              glvolume_collection, colors_out, shader,
-                                                                                                              Slic3r::GUI::Camera::EType::Ortho,
-                                                                                                              Slic3r::GUI::Camera::ViewAngleType::Top_Plate,
-                                                                                                              true,true);
-                                                    break;
-                                                }
-                                            default:
-                                                BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: unknown");
-                                                break;
-                                        }
-                                        plate_data->top_file = "valid_top";
-                                        plate_data->pick_file = "valid_pick";
-                                        BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s top_thumbnail,finished rendering")%(i+1);
-                                    }
-                                }
-                            }
-
-                            if (need_create_top_group) {
-                                top_thumbnails.push_back(&part_plate->top_thumbnail_data);
-                                pick_thumbnails.push_back(&part_plate->pick_thumbnail_data);
-                                BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%: add thumbnail data for top and pick into group")%(i+1);
+                                BOOST_LOG_TRIVIAL(warning) << boost::format("decode png to mem failed.");
                             }
                         }
+                    }
+                    else {
+                        ThumbnailData* thumbnail_data = &plate_data->plate_thumbnail;
+
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, Skip plate %2%.")%__LINE__%(i+1);
+                        }
+                        else {
+                            unsigned int thumbnail_width = 512, thumbnail_height = 512;
+                            const ThumbnailsParams thumbnail_params = {{}, false, true, true, true, i};
+
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s thumbnail, need to regenerate")%(i+1);
+                            switch (Slic3r::GUI::OpenGLManager::get_framebuffers_type())
+                            {
+                            case Slic3r::GUI::OpenGLManager::EFramebufferType::Arb:
+                                    {
+                                        BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: ARB");
+                                        Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*thumbnail_data,
+                                           thumbnail_width, thumbnail_height, thumbnail_params,
+                                           partplate_list, model.objects, glvolume_collection, colors_out, shader, Slic3r::GUI::Camera::EType::Ortho);
+                                        break;
+                                    }
+                            case Slic3r::GUI::OpenGLManager::EFramebufferType::Ext:
+                                    {
+                                        BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: EXT");
+                                        Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*thumbnail_data,
+                                           thumbnail_width, thumbnail_height, thumbnail_params,
+                                           partplate_list, model.objects, glvolume_collection, colors_out, shader, Slic3r::GUI::Camera::EType::Ortho);
+                                        break;
+                                    }
+                            default:
+                                    BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: unknown");
+                                    break;
+                            }
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s thumbnail,finished rendering")%(i+1);
+                        }
+                    }
+                    if (need_create_thumbnail_group) {
+                        thumbnails.push_back(&plate_data->plate_thumbnail);
+                        BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%: add thumbnail data into group")%(i+1);
+                    }
+
+                    //no light thumbnail
+                    if (!plate_data->no_light_thumbnail_file.empty() && (boost::filesystem::exists(plate_data->no_light_thumbnail_file)))
+                    {
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, clear plate %2%'s no_light_thumbnail_file path to empty.")%__LINE__%(i+1);
+                            plate_data->no_light_thumbnail_file.clear();
+                        }
+                        else
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has valid no_light_thumbnail_file extracted from 3mf, directly using it")%(i+1);
+                    }
+                    else{
+                        ThumbnailData *no_light_thumbnail = &part_plate->no_light_thumbnail_data;
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, Skip plate %2%.")%__LINE__%(i+1);
+                            part_plate->no_light_thumbnail_data.reset();
+                            plate_data->no_light_thumbnail_file.clear();
+                        }
+                        else {
+                            unsigned int thumbnail_width = 512, thumbnail_height = 512;
+                            const ThumbnailsParams thumbnail_params = { {}, false, true, false, true, i };
+
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s no_light_thumbnail_file missed, need to regenerate")%(i+1);
+                            switch (Slic3r::GUI::OpenGLManager::get_framebuffers_type())
+                            {
+                                case Slic3r::GUI::OpenGLManager::EFramebufferType::Arb:
+                                    {
+                                        BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: ARB");
+                                        Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*no_light_thumbnail,
+                                           thumbnail_width, thumbnail_height, thumbnail_params,
+                                                                                          partplate_list, model.objects, glvolume_collection, colors_out, shader,
+                                                                                          Slic3r::GUI::Camera::EType::Ortho, Slic3r::GUI::Camera::ViewAngleType::Iso,
+                                                                                          false, true);
+                                        break;
+                                    }
+                                case Slic3r::GUI::OpenGLManager::EFramebufferType::Ext:
+                                    {
+                                        BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: EXT");
+                                        Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*no_light_thumbnail,
+                                           thumbnail_width, thumbnail_height, thumbnail_params,
+                                                                                              partplate_list, model.objects, glvolume_collection, colors_out, shader,
+                                                                                              Slic3r::GUI::Camera::EType::Ortho, Slic3r::GUI::Camera::ViewAngleType::Iso,
+                                                                                              false, true);
+                                        break;
+                                    }
+                                default:
+                                    BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: unknown");
+                                    break;
+                            }
+                            plate_data->no_light_thumbnail_file = "valid_no_light";
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s no_light thumbnail,finished rendering")%(i+1);
+                        }
+                    }
+
+                    if (need_create_no_light_group) {
+                        no_light_thumbnails.push_back(&part_plate->no_light_thumbnail_data);
+                        BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%: add thumbnail data for no_light into group")%(i+1);
+                    }
+
+                    //top thumbnails
+                    /*if (part_plate->top_thumbnail_data.is_valid() && part_plate->pick_thumbnail_data.is_valid()) {
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, reset plate %2%'s top/pick thumbnail.")%__LINE__%(i+1);
+                            part_plate->top_thumbnail_data.reset();
+                            part_plate->pick_thumbnail_data.reset();
+                            plate_data->top_file.clear();
+                            plate_data->pick_file.clear();
+                        }
+                        else {
+                            plate_data->top_file = "valid_top";
+                            plate_data->pick_file = "valid_pick";
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has a valid top/pick thumbnail data, directly using it")%(i+1);
+                        }
+                    }
+                    else*/
+                    if ((!plate_data->top_file.empty() && (boost::filesystem::exists(plate_data->top_file)))
+                        &&(!plate_data->pick_file.empty() && (boost::filesystem::exists(plate_data->pick_file))))
+                    {
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, clear plate %2%'s top/pick thumbnail file path to empty.")%__LINE__%(i+1);
+                            plate_data->top_file.clear();
+                            plate_data->pick_file.clear();
+                        }
+                        else
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1% has valid top/pick thumbnail extracted from 3mf, directly using it")%(i+1);
+                    }
+                    else{
+                        ThumbnailData* top_thumbnail = &part_plate->top_thumbnail_data;
+                        ThumbnailData* picking_thumbnail = &part_plate->pick_thumbnail_data;
+                        if ((plate_to_slice != 0) && (plate_to_slice != (i + 1))) {
+                            BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: regenerate thumbnail, Skip plate %2%.")%__LINE__%(i+1);
+                            part_plate->top_thumbnail_data.reset();
+                            part_plate->pick_thumbnail_data.reset();
+                            plate_data->top_file.clear();
+                            plate_data->pick_file.clear();
+                        }
+                        else {
+                            unsigned int thumbnail_width = 512, thumbnail_height = 512;
+                            const ThumbnailsParams thumbnail_params = { {}, false, true, false, true, i };
+
+                            BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s top/pick thumbnail missed, need to regenerate, objects count %2%, skip_useless_pick %3%")%(i+1) %plate_object_count[i] %skip_useless_pick;
+                            if (skip_useless_pick && ((plate_object_count[i] <= 1) || (plate_object_count[i] > 64)))
+                            {
+                                //don't render pick and top
+                                part_plate->top_thumbnail_data.reset();
+                                part_plate->pick_thumbnail_data.reset();
+                                plate_data->top_file.clear();
+                                plate_data->pick_file.clear();
+                                BOOST_LOG_TRIVIAL(info) << boost::format("skip rendering for top&&pick");
+                            }
+                            else {
+                                switch (Slic3r::GUI::OpenGLManager::get_framebuffers_type())
+                                {
+                                    case Slic3r::GUI::OpenGLManager::EFramebufferType::Arb:
+                                        {
+                                            BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: ARB");
+                                            Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*top_thumbnail,
+                                               thumbnail_width, thumbnail_height, thumbnail_params,
+                                                                                              partplate_list, model.objects, glvolume_collection, colors_out, shader,
+                                                                                              Slic3r::GUI::Camera::EType::Ortho, Slic3r::GUI::Camera::ViewAngleType::Top_Plate,
+                                                                                              false);
+                                            Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer(*picking_thumbnail,
+                                               thumbnail_width, thumbnail_height, thumbnail_params,
+                                                                                                  partplate_list, model.objects, glvolume_collection, colors_out, shader,
+                                                                                                  Slic3r::GUI::Camera::EType::Ortho,
+                                                                                                  Slic3r::GUI::Camera::ViewAngleType::Top_Plate, true, true);
+                                            break;
+                                        }
+                                    case Slic3r::GUI::OpenGLManager::EFramebufferType::Ext:
+                                        {
+                                            BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: EXT");
+                                            Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*top_thumbnail,
+                                               thumbnail_width, thumbnail_height, thumbnail_params,
+                                                                                                  partplate_list, model.objects, glvolume_collection, colors_out, shader,
+                                                                                                  Slic3r::GUI::Camera::EType::Ortho,
+                                                                                                  Slic3r::GUI::Camera::ViewAngleType::Top_Plate, false);
+                                            Slic3r::GUI::GLCanvas3D::render_thumbnail_framebuffer_ext(*picking_thumbnail,
+                                               thumbnail_width, thumbnail_height, thumbnail_params, partplate_list, model.objects,
+                                                                                                      glvolume_collection, colors_out, shader,
+                                                                                                      Slic3r::GUI::Camera::EType::Ortho,
+                                                                                                      Slic3r::GUI::Camera::ViewAngleType::Top_Plate,
+                                                                                                      true,true);
+                                            break;
+                                        }
+                                    default:
+                                        BOOST_LOG_TRIVIAL(info) << boost::format("framebuffer_type: unknown");
+                                        break;
+                                }
+                                plate_data->top_file = "valid_top";
+                                plate_data->pick_file = "valid_pick";
+                                BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%'s top_thumbnail,finished rendering")%(i+1);
+                            }
+                        }
+                    }
+
+                    if (need_create_top_group) {
+                        top_thumbnails.push_back(&part_plate->top_thumbnail_data);
+                        pick_thumbnails.push_back(&part_plate->pick_thumbnail_data);
+                        BOOST_LOG_TRIVIAL(info) << boost::format("plate %1%: add thumbnail data for top and pick into group")%(i+1);
                     }
                 }
             }
-            //BBS: release glfw
-            glfwTerminate();
         }
         else {
             BOOST_LOG_TRIVIAL(info) << boost::format("Line %1%: use previous thumbnails, no need to regenerate")%__LINE__;
