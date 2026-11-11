@@ -1,7 +1,7 @@
 Bottom: 125dcd8a6a537c76565d2097a394a1f885cf7688
-Top:    3de765894a0309f442a3b2d8d24779513aa90a85
+Top:    d4928cdc0d0a61c9fb2173de856880557c9d01f1
 Author: brad <bradprin@live.com>
-Date:   2026-11-10 21:47:15 -0600
+Date:   2026-11-10 21:47:34 -0600
 
 fork: write G-code preview thumbnails from the CLI
 
