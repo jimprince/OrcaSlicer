@@ -1,12 +1,13 @@
 {
   "version": 5,
-  "prev": "35ce3b82d7a448c6bd5b073baefb53ec1e46e2c2",
-  "head": "71e7d65301615a8b923e3d29131b3fa884268c62",
+  "prev": "2faa967ab8d9e59becb0fbc3d2fb15ea68a1f703",
+  "head": "781cd5124924c879906173c18e10ab1dc5ce06fe",
   "applied": [
     "fork-group-user-printer-nozzle",
     "fork-stack-metadata",
     "fork-ci-macos-arm64",
-    "fork-cli-gcode-thumbnails"
+    "fork-cli-gcode-thumbnails",
+    "refresh-temp"
   ],
   "unapplied": [],
   "hidden": [],
@@ -22,6 +23,9 @@
     },
     "fork-stack-metadata": {
       "oid": "5e4922372388b129fada7907b3b3b272b87a96e2"
+    },
+    "refresh-temp": {
+      "oid": "781cd5124924c879906173c18e10ab1dc5ce06fe"
     }
   }
 }
