@@ -1,7 +1,7 @@
 {
   "branch": "main",
-  "created_at": "2026-11-11T03:41:37Z",
-  "number": 3,
+  "created_at": "2026-11-11T03:48:07Z",
+  "number": 4,
   "patches": [
     {
       "commit": "833d1e91cf4c195821a6148ef24e6866845b1fb8",
@@ -32,13 +32,23 @@
         "upstream": null
       },
       "name": "fork-ci-macos-arm64"
+    },
+    {
+      "commit": "6a36df8f529e61429da93298b4297a32e7e40377",
+      "lifecycle": {
+        "base": "96967976388838e9aa16eca72db5afb22ebacb94",
+        "patch_class": "divergence",
+        "retire_when": "manual:upstream's CLI (src/OrcaSlicer.cpp) passes a thumbnail callback to export_gcode",
+        "upstream": null
+      },
+      "name": "fork-cli-gcode-thumbnails"
     }
   ],
-  "previous_revision": "911984f71ff9b9b541cd02a5d060860957dc2fa5",
-  "result_commit": "716476a34ac3472eab355e450424f94d712799aa",
-  "result_tree": "125dcd8a6a537c76565d2097a394a1f885cf7688",
+  "previous_revision": "57dbb07aa5a1a4f147e7db3834c7618e0a2d319e",
+  "result_commit": "6a36df8f529e61429da93298b4297a32e7e40377",
+  "result_tree": "d4928cdc0d0a61c9fb2173de856880557c9d01f1",
   "schema_version": 1,
-  "stack_state": "f4729a7ded2502c32eccb46ccb68376fefd566a9",
+  "stack_state": "7edfcf541dcfbab02901d175da7785dac3a40e75",
   "upstream_branch": "main",
   "upstream_commit": "96967976388838e9aa16eca72db5afb22ebacb94",
   "verification": {
