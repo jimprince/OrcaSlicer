@@ -659,7 +659,7 @@ public:
     }
 
     // G-code thumbnail callback: one image of plate `params.plate_id` per size, none without OpenGL.
-    ThumbnailsList render(const ThumbnailsParams& params, PartPlateList& plates, Model& model, const ConfigOptionStrings* filament_color)
+    ThumbnailsList render(const ThumbnailsParams& params, GUI::PartPlateList& plates, Model& model, const ConfigOptionStrings* filament_color)
     {
         ThumbnailsList thumbnails;
         if (!prepare(model, filament_color))
