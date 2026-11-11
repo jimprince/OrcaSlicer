@@ -1,24 +1,23 @@
 {
   "version": 5,
-  "prev": "b1ea104921f0e15d0af796e763faee611a7e962f",
-  "head": "833d1e91cf4c195821a6148ef24e6866845b1fb8",
+  "prev": "f5eece45fb57da24d4ec830164325b1432fb2350",
+  "head": "716476a34ac3472eab355e450424f94d712799aa",
   "applied": [
-    "fork-group-user-printer-nozzle"
-  ],
-  "unapplied": [
+    "fork-group-user-printer-nozzle",
     "fork-stack-metadata",
     "fork-ci-macos-arm64"
   ],
+  "unapplied": [],
   "hidden": [],
   "patches": {
     "fork-ci-macos-arm64": {
-      "oid": "aa29533fb6a706f90503ba02b0da6bec56cbed23"
+      "oid": "716476a34ac3472eab355e450424f94d712799aa"
     },
     "fork-group-user-printer-nozzle": {
       "oid": "833d1e91cf4c195821a6148ef24e6866845b1fb8"
     },
     "fork-stack-metadata": {
-      "oid": "0cb0eca09905c05aacd84ed2aff689d64a95169b"
+      "oid": "5e4922372388b129fada7907b3b3b272b87a96e2"
     }
   }
 }
