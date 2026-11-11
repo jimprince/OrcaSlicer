@@ -1,6 +1,26 @@
 Bottom: 125dcd8a6a537c76565d2097a394a1f885cf7688
-Top:    125dcd8a6a537c76565d2097a394a1f885cf7688
+Top:    3de765894a0309f442a3b2d8d24779513aa90a85
 Author: brad <bradprin@live.com>
-Date:   2026-11-10 21:44:59 -0600
+Date:   2026-11-10 21:47:15 -0600
 
 fork: write G-code preview thumbnails from the CLI
+
+The headless CLI (--slice) passed a null thumbnail callback to
+Print::export_gcode, so the printer's thumbnails setting (e.g.
+96x96/PNG, 300x300/PNG) was ignored and printer UIs (Mainsail, Fluidd,
+Moonraker) showed no preview for CLI-sliced files.
+
+Factor the CLI's offscreen renderer (hidden GLFW window, OpenGLManager,
+thumbnail shader, model volumes) out of the 3MF export block into
+CliThumbnailRenderer, set up lazily on first use, and use it both as the
+G-code thumbnail callback and for the 3MF plate images. Without OpenGL
+the failure is logged once and the G-code is written without
+thumbnails; the exit code is unchanged. GLFW is told not to switch the
+working directory to the app bundle's Resources on macOS, so relative
+output paths still resolve after the first render.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Fork-Class: divergence
+Fork-Base: 96967976388838e9aa16eca72db5afb22ebacb94
+Fork-Retire-When: upstream's CLI (src/OrcaSlicer.cpp) passes a thumbnail callback to export_gcode
