@@ -1,13 +1,13 @@
 {
   "version": 5,
-  "prev": "7cc85b82e64ee4c2835b798af42eced9adc9a43a",
-  "head": "aa29533fb6a706f90503ba02b0da6bec56cbed23",
-  "applied": [
+  "prev": "e396efe377073813b37323244282fa3393d35ff4",
+  "head": "4441bcc065f404972d9c7e904568aa11c3b9f5dc",
+  "applied": [],
+  "unapplied": [
     "fork-group-user-printer-nozzle",
     "fork-stack-metadata",
     "fork-ci-macos-arm64"
   ],
-  "unapplied": [],
   "hidden": [],
   "patches": {
     "fork-ci-macos-arm64": {
