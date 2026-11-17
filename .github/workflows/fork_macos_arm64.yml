@@ -1,0 +1,23 @@
+# Fork-only: builds the macOS arm64 app bundle that Brad installs.
+# Upstream workflows are disabled on jimprince/OrcaSlicer; this reuses
+# upstream's build_check_cache.yml so the build recipe follows upstream.
+name: Fork macOS arm64
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: fork-macos-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_macos_arm64:
+    if: github.repository != 'OrcaSlicer/OrcaSlicer'
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: macos-15
+      arch: arm64
+    secrets: inherit
